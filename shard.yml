@@ -1,0 +1,13 @@
+name: crox
+version: 0.1.0
+
+authors:
+  - Dave Yarwood <dave.yarwood@gmail.com>
+
+targets:
+  crox:
+    main: src/crox.cr
+
+crystal: 0.24.1
+
+license: MIT
