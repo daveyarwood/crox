@@ -1,27 +1,14 @@
 # crox
 
-TODO: Write a description here
+The `clox` compiler from [Crafting Interpreters][craint], implemented in
+[Crystal][crystal].
 
-## Installation
+[craint]: http://www.craftinginterpreters.com
+[crystal]: https://crystal-lang.org
 
-TODO: Write installation instructions here
+## License
 
-## Usage
+Copyright © 2018 Dave Yarwood
 
-TODO: Write usage instructions here
+Distributed under the Eclipse Public License version 2.0.
 
-## Development
-
-TODO: Write development instructions here
-
-## Contributing
-
-1. Fork it ( https://github.com/[your-github-name]/crox/fork )
-2. Create your feature branch (git checkout -b my-new-feature)
-3. Commit your changes (git commit -am 'Add some feature')
-4. Push to the branch (git push origin my-new-feature)
-5. Create a new Pull Request
-
-## Contributors
-
-- [[your-github-name]](https://github.com/[your-github-name]) Dave Yarwood - creator, maintainer
