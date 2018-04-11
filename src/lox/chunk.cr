@@ -1,6 +1,11 @@
 module Lox
   enum Opcode
     Constant
+    Add
+    Subtract
+    Multiply
+    Divide
+    Negate
     Return
   end
 
@@ -21,6 +26,8 @@ module Lox
   alias LineNumber = Int32
 
   class Chunk
+    getter :bytes, :constants
+
     def initialize
       @bytes = [] of Byte
       @constants = [] of Value
@@ -54,11 +61,12 @@ module Lox
         line = @line_numbers[i]
         code = Opcode.new(@bytes[i])
         result << case code
-        when Opcode::Return
-          {line, {Opcode::Return, [] of Operand}}
         when Opcode::Constant
           i += 1
           {line, {Opcode::Constant, [@bytes[i]]}}
+        when Opcode::Add, Opcode::Subtract, Opcode::Multiply, Opcode::Divide,
+             Opcode::Negate, Opcode::Return
+          {line, {code, [] of Operand}}
         else
           {line, UnknownOpcode.new(code.value)}
         end
