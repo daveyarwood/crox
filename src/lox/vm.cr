@@ -11,7 +11,7 @@ module Lox
     end
 
     def start!
-      @@stack = [] of Value
+      @@stack = [] of Lox::Value
     end
 
     def stop!
@@ -37,7 +37,7 @@ module Lox
       byte
     end
 
-    def read_constant! : Value
+    def read_constant! : Lox::Value
       @@chunk.not_nil!.constants[read_byte!]
     end
 
@@ -51,6 +51,34 @@ module Lox
       @@chunk = chunk
       @@byte_index = 0
       run!
+    end
+
+    def interpret!(input : String) : InterpretResult
+      Lox::Compiler.compile(input)
+      InterpretResult::OK
+    end
+
+    def repl_session!
+      while true
+        print "> "
+        input = gets
+        break if input.nil?
+        interpret!(input) unless input.blank?
+      end
+    end
+
+    def run_file!(file : String)
+      unless File.exists? file
+        puts "Could not open file \"#{file}\"."
+        exit 74
+      end
+
+      case interpret!(File.read(file))
+      when InterpretResult::CompileError
+        exit 65
+      when InterpretResult::RuntimeError
+        exit 70
+      end
     end
 
     def run! : InterpretResult

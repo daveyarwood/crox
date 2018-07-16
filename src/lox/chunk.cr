@@ -30,7 +30,7 @@ module Lox
 
     def initialize
       @bytes = [] of Byte
-      @constants = [] of Value
+      @constants = [] of Lox::Value
       @line_numbers = [] of LineNumber
     end
 
@@ -45,7 +45,7 @@ module Lox
 
     # Adds a constant to the constant pool and returns the index it got written
     # to, so the caller can retrieve it when needed.
-    def add_constant(constant : Value) : Int32
+    def add_constant(constant : Lox::Value) : Int32
       @constants << constant
       @constants.size - 1
     end
