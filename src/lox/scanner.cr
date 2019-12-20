@@ -18,12 +18,12 @@ module Lox
       @input[@current + 1] unless @current + 1 >= @input.size
     end
 
-    def advance : Char
+    def advance! : Char
       @current += 1
       @input[@current - 1]
     end
 
-    def match(expected : Char) : Bool
+    def match!(expected : Char) : Bool
       if peek == expected
         @current += 1
         true
@@ -40,19 +40,19 @@ module Lox
       Token.new TokenType::Error, msg, @start, @line
     end
 
-    def skip_whitespace
+    def skip_whitespace!
       while true
         case peek
         when ' ', '\r', '\t'
-          advance
+          advance!
         when '\n'
           @line += 1
-          advance
+          advance!
         when '/'
           break unless peek_next == '/'
           # A comment goes until the end of the line (or EOF).
           while peek != '\n' && !eof?;
-            advance
+            advance!
           end
         else
           break
@@ -60,26 +60,26 @@ module Lox
       end
     end
 
-    def string_token : Token
+    def string_token! : Token
       while peek != '"' && !eof?
         @line += 1 if peek == '\n'
-        advance
+        advance!
       end
 
       return error_token("Unterminated string.") if eof?
 
       # consume the closing "
-      advance
+      advance!
       token TokenType::String
     end
 
-    def number_token : Token
-      while peek.try &.ascii_number?(10); advance; end
+    def number_token! : Token
+      while peek.try &.ascii_number?(10); advance!; end
 
       if peek == '.' && peek_next.try &.ascii_number?(10)
         # consume the .
-        advance
-        while peek.try &.ascii_number?(10); advance; end
+        advance!
+        while peek.try &.ascii_number?(10); advance!; end
       end
 
       token TokenType::Number
@@ -126,21 +126,21 @@ module Lox
       end
     end
 
-    def identifier_token : Token
+    def identifier_token! : Token
       while peek.try &.in_set?("A-Za-z_") || peek.try &.ascii_number?(10)
-        advance
+        advance!
       end
 
       token identifier_type
     end
 
-    def scan_token : Token
-      skip_whitespace
+    def scan_token! : Token
+      skip_whitespace!
 
       @start = @current
       return token(TokenType::EOF) if eof?
 
-      case advance
+      case advance!
       when '('
         token TokenType::LeftParen
       when ')'
@@ -164,19 +164,19 @@ module Lox
       when '*'
         token TokenType::Star
       when '!'
-        token(match('=') ? TokenType::BangEqual : TokenType::Bang)
+        token(match!('=') ? TokenType::BangEqual : TokenType::Bang)
       when '='
-        token(match('=') ? TokenType::EqualEqual : TokenType::Equal)
+        token(match!('=') ? TokenType::EqualEqual : TokenType::Equal)
       when '<'
-        token(match('=') ? TokenType::LessEqual : TokenType::Less)
+        token(match!('=') ? TokenType::LessEqual : TokenType::Less)
       when '>'
-        token(match('=') ? TokenType::GreaterEqual : TokenType::Greater)
+        token(match!('=') ? TokenType::GreaterEqual : TokenType::Greater)
       when '"'
-        string_token
+        string_token!
       when .ascii_number?(10) # 0-9
-        number_token
+        number_token!
       when .in_set?("A-Za-z_")
-        identifier_token
+        identifier_token!
       else
         error_token("Unexpected character.")
       end
