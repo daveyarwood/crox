@@ -8,6 +8,6 @@ targets:
   crox:
     main: src/crox.cr
 
-crystal: 0.24.1
+crystal: 0.32.1
 
 license: MIT
