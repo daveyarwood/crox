@@ -9,9 +9,10 @@ module Lox
       while true
         token = scanner.scan_token
         if token.line == line
-          print "    | "
+          print "   | "
         else
           printf "%4d ", token.line
+          line = token.line
         end
         printf "%s '%s'\n", token.type, token.lexeme
         break if token.type == TokenType::EOF
