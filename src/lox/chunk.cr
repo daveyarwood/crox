@@ -31,18 +31,18 @@ module Lox
       @line_numbers = [] of LineNumber
     end
 
-    def write(line : LineNumber, byte : Byte)
+    def write!(line : LineNumber, byte : Byte)
       @bytes << byte
       @line_numbers << line
     end
 
-    def write(line : LineNumber, opcode : Opcode)
-      write line, opcode.value
+    def write!(line : LineNumber, opcode : Opcode)
+      write! line, opcode.value
     end
 
     # Adds a constant to the constant pool and returns the index it got written
     # to, so the caller can retrieve it when needed.
-    def add_constant(constant : Lox::Value) : Int32
+    def add_constant!(constant : Lox::Value) : Int32
       @constants << constant
       @constants.size - 1
     end
