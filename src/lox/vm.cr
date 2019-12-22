@@ -2,12 +2,17 @@ module Lox
   module VM
     extend self
 
+    # These are here so that the types can be Foo instead of (Foo | Nil).
+    @@stack = [] of Lox::Value
+    @@chunk = Chunk.new
+    @@byte_index = 0
+
     def push!(value)
-      @@stack.not_nil! << value
+      @@stack << value
     end
 
     def pop!
-      @@stack.not_nil!.pop
+      @@stack.pop
     end
 
     def start!
@@ -25,20 +30,20 @@ module Lox
 
     # instruction pointer
     def ip : Byte
-      @@chunk.not_nil!.bytes[@@byte_index.not_nil!]
+      @@chunk.bytes[@@byte_index]
     end
 
     def read_byte! : Byte
       # store the current byte so we can return it
       byte = ip
       # increment the instruction pointer so it points to the NEXT byte
-      @@byte_index = @@byte_index.not_nil! + 1
+      @@byte_index += 1
       # return the byte we just read
       byte
     end
 
     def read_constant! : Lox::Value
-      @@chunk.not_nil!.constants[read_byte!]
+      @@chunk.constants[read_byte!]
     end
 
     macro binary_op!(op)
