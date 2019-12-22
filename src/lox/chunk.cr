@@ -9,10 +9,7 @@ module Lox
     Return
   end
 
-  struct UnknownOpcode
-    property code
-    def initialize(@code : Int32); end
-  end
+  record UnknownOpcode, code : Int32
 
   alias Byte = Int32
   alias Operand = Byte
