@@ -15,13 +15,6 @@ module Lox
       @@stack.pop
     end
 
-    def start!
-      @@stack = [] of Lox::Value
-    end
-
-    def stop!
-    end
-
     enum InterpretResult
       OK
       CompileError
@@ -59,8 +52,11 @@ module Lox
     end
 
     def interpret!(input : String) : InterpretResult
-      Lox::Compiler.compile(input)
-      InterpretResult::OK
+      chunk = Lox::Compiler.compile(input)
+      return InterpretResult::CompileError if chunk.nil?
+      @@chunk = chunk
+      @@byte_index = 0
+      run!
     end
 
     def repl_session!
@@ -88,11 +84,12 @@ module Lox
 
     def run! : InterpretResult
       while true
-        instruction = Opcode.new(read_byte!)
+        # instruction = Opcode.new(read_byte!)
+        byte = read_byte!
+        instruction = Opcode.new(byte)
 
         {% if flag?(:debug_trace_execution) %}
-          puts "stack: #{@@stack}"
-          p instruction
+          puts "stack: #{@@stack}, instruction: #{instruction}"
         {% end %}
 
         case instruction

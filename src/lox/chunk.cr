@@ -1,5 +1,5 @@
 module Lox
-  enum Opcode
+  enum Opcode : Int8
     Constant
     Add
     Subtract
@@ -9,9 +9,9 @@ module Lox
     Return
   end
 
-  record UnknownOpcode, code : Int32
+  record UnknownOpcode, code : Int8
 
-  alias Byte = Int32
+  alias Byte = Int8
   alias Operand = Byte
 
   # An instruction is an opcode and zero or more operands
@@ -42,9 +42,9 @@ module Lox
 
     # Adds a constant to the constant pool and returns the index it got written
     # to, so the caller can retrieve it when needed.
-    def add_constant!(constant : Lox::Value) : Int32
+    def add_constant!(constant : Lox::Value) : Byte
       @constants << constant
-      @constants.size - 1
+      (@constants.size - 1).to_i8
     end
 
     alias DisassemblerEntry = Tuple(LineNumber, Instruction | UnknownOpcode)
