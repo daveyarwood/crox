@@ -1,4 +1,4 @@
 module Lox
-  alias Value = Float64
+  alias Value = Nil | Bool | Float64
 end
 

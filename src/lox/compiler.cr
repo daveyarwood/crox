@@ -27,18 +27,29 @@ module Lox
       unary    = ->(){unary!}
       binary   = ->(){binary!}
       number   = ->(){number!}
+      literal  = ->(){literal!}
 
       rules =
         Hash(TokenType, Tuple(ParseFn|Nil, ParseFn|Nil, Precedence)).new(
         {nil, nil, Precedence::None}
       )
 
-      rules[TokenType::LeftParen] = {grouping, nil,    Precedence::None}
-      rules[TokenType::Minus]     = {unary,    binary, Precedence::Term}
-      rules[TokenType::Plus]      = {nil,      binary, Precedence::Term}
-      rules[TokenType::Slash]     = {nil,      binary, Precedence::Factor}
-      rules[TokenType::Star]      = {nil,      binary, Precedence::Factor}
-      rules[TokenType::Number]    = {number,   nil,    Precedence::None}
+      rules[TokenType::LeftParen]    = {grouping, nil,    Precedence::None}
+      rules[TokenType::Minus]        = {unary,    binary, Precedence::Term}
+      rules[TokenType::Plus]         = {nil,      binary, Precedence::Term}
+      rules[TokenType::Slash]        = {nil,      binary, Precedence::Factor}
+      rules[TokenType::Star]         = {nil,      binary, Precedence::Factor}
+      rules[TokenType::Bang]         = {unary,    nil,    Precedence::None}
+      rules[TokenType::BangEqual]    = {nil,      binary, Precedence::Equality}
+      rules[TokenType::EqualEqual]   = {nil,      binary, Precedence::Equality}
+      rules[TokenType::Greater]      = {nil,     binary, Precedence::Comparison}
+      rules[TokenType::GreaterEqual] = {nil,     binary, Precedence::Comparison}
+      rules[TokenType::Less]         = {nil,     binary, Precedence::Comparison}
+      rules[TokenType::LessEqual]    = {nil,     binary, Precedence::Comparison}
+      rules[TokenType::Number]       = {number,   nil,    Precedence::None}
+      rules[TokenType::Nil]          = {literal,  nil,    Precedence::None}
+      rules[TokenType::False]        = {literal,  nil,    Precedence::None}
+      rules[TokenType::True]         = {literal,  nil,    Precedence::None}
 
       prefix, infix, precedence = rules[operator_type]
 
@@ -149,6 +160,8 @@ module Lox
 
       # Emit the operator instruction.
       case operator_type
+      when TokenType::Bang
+        emit_byte! Opcode::Not.value
       when TokenType::Minus
         emit_byte! Opcode::Negate.value
       end
@@ -163,6 +176,18 @@ module Lox
 
       # Emit the operator instructions.
       case operator_type
+      when TokenType::BangEqual
+        emit_bytes! Opcode::Equal.value, Opcode::Not.value
+      when TokenType::EqualEqual
+        emit_byte! Opcode::Equal.value
+      when TokenType::Greater
+        emit_byte! Opcode::Greater.value
+      when TokenType::GreaterEqual
+        emit_bytes! Opcode::Less.value, Opcode::Not.value
+      when TokenType::Less
+        emit_byte! Opcode::Less.value
+      when TokenType::LessEqual
+        emit_bytes! Opcode::Greater.value, Opcode::Not.value
       when TokenType::Plus
         emit_byte! Opcode::Add.value
       when TokenType::Minus
@@ -171,6 +196,17 @@ module Lox
         emit_byte! Opcode::Multiply.value
       when TokenType::Slash
         emit_byte! Opcode::Divide.value
+      end
+    end
+
+    def literal!
+      case @@parser.previous.type
+      when TokenType::Nil
+        emit_byte! Opcode::Nil.value
+      when TokenType::False
+        emit_byte! Opcode::False.value
+      when TokenType::True
+        emit_byte! Opcode::True.value
       end
     end
 
