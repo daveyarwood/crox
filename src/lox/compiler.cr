@@ -206,13 +206,13 @@ module Lox
       # order to shim the expression into a statement.
       emit_return!
 
+      return nil if @@parser.had_error
+
       {% if flag?(:debug_print_code) %}
-        unless @@parser.had_error
-          p current_chunk.disassemble
-        end
+        pp current_chunk.disassemble
       {% end %}
 
-      return @@chunk unless @@parser.had_error
+      return @@chunk
     end
   end
 end
