@@ -8,7 +8,7 @@ The `clox` compiler from [Crafting Interpreters][craint], implemented in
 
 ## License
 
-Copyright © 2018-2019 Dave Yarwood
+Copyright © 2018-2020 Dave Yarwood
 
 Distributed under the Eclipse Public License version 2.0.
 
