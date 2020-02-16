@@ -59,6 +59,40 @@ module Lox
       end
     end
 
+    def equal!
+      b = pop!
+      a = pop!
+
+      case {a, b}
+      when {ObjString, ObjString}
+        push! (a.chars == b.as(ObjString).chars)
+      when {Obj, _}, {_, Obj}
+        runtime_error! "Equality semantics undefined: #{a.class} == #{b.class}"
+        return false
+      else
+        push! (a == b)
+      end
+
+      return true
+    end
+
+    def add!
+      b = pop!
+      a = pop!
+
+      case {a, b}
+      when {ObjString, ObjString}
+        push! ObjString.new(a.chars + b.chars)
+      when {Float64, Float64}
+        push! (a + b)
+      else
+        runtime_error! "Operands must be two numbers or two strings."
+        return false
+      end
+
+      return true
+    end
+
     def interpret!(chunk : Chunk) : InterpretResult
       @@chunk = chunk
       @@byte_index = 0
@@ -136,15 +170,13 @@ module Lox
         when Opcode::True
           push! true
         when Opcode::Equal
-          b = pop!
-          a = pop!
-          push! a == b
+          equal! || return InterpretResult::RuntimeError
         when Opcode::Greater
           binary_op!(:>) || return InterpretResult::RuntimeError
         when Opcode::Less
           binary_op!(:<) || return InterpretResult::RuntimeError
         when Opcode::Add
-          binary_op!(:+) || return InterpretResult::RuntimeError
+          add! || return InterpretResult::RuntimeError
         when Opcode::Subtract
           binary_op!(:-) || return InterpretResult::RuntimeError
         when Opcode::Multiply

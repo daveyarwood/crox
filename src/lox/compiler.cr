@@ -28,6 +28,7 @@ module Lox
       binary   = ->(){binary!}
       number   = ->(){number!}
       literal  = ->(){literal!}
+      string   = ->(){string!}
 
       rules =
         Hash(TokenType, Tuple(ParseFn|Nil, ParseFn|Nil, Precedence)).new(
@@ -50,6 +51,7 @@ module Lox
       rules[TokenType::Nil]          = {literal,  nil,    Precedence::None}
       rules[TokenType::False]        = {literal,  nil,    Precedence::None}
       rules[TokenType::True]         = {literal,  nil,    Precedence::None}
+      rules[TokenType::String]       = {string,   nil,    Precedence::None}
 
       prefix, infix, precedence = rules[operator_type]
 
@@ -145,6 +147,10 @@ module Lox
 
     def number!
       emit_constant! @@parser.previous.lexeme.to_f
+    end
+
+    def string!
+      emit_constant! ObjString.new(@@parser.previous.lexeme.chars[1..-2])
     end
 
     def grouping!
