@@ -65,7 +65,7 @@ module Lox
 
       case {a, b}
       when {ObjString, ObjString}
-        push! (a.chars == b.as(ObjString).chars)
+        push! a == b
       when {Obj, _}, {_, Obj}
         runtime_error! "Equality semantics undefined: #{a.class} == #{b.class}"
         return false
