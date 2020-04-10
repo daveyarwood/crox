@@ -145,20 +145,20 @@ module Lox
       emit_bytes! Opcode::Constant.value, make_constant!(value)
     end
 
-    def number!
+    def number! : Nil
       emit_constant! @@parser.previous.lexeme.to_f
     end
 
-    def string!
+    def string! : Nil
       emit_constant! ObjString.new(@@parser.previous.lexeme.chars[1..-2])
     end
 
-    def grouping!
+    def grouping! : Nil
       expression!
       consume!(TokenType::RightParen, "Expect ')' after expression.")
     end
 
-    def unary!
+    def unary! : Nil
       operator_type = @@parser.previous.type
 
       # Compile the operand.
@@ -173,7 +173,7 @@ module Lox
       end
     end
 
-    def binary!
+    def binary! : Nil
       # Remember the operator.
       operator_type = @@parser.previous.type
 
@@ -205,7 +205,7 @@ module Lox
       end
     end
 
-    def literal!
+    def literal! : Nil
       case @@parser.previous.type
       when TokenType::Nil
         emit_byte! Opcode::Nil.value
