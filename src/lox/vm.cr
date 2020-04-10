@@ -123,6 +123,8 @@ module Lox
       end
 
       case interpret!(File.read(file))
+      when InterpretResult::OK
+        # no problem
       when InterpretResult::CompileError
         exit 65
       when InterpretResult::RuntimeError

@@ -134,7 +134,7 @@ module Lox
       # The constant index needs to fit into a single byte, which means we can
       # store up to Byte::MAX constants.
       if current_chunk.constants.size > Byte::MAX
-        error!("Too many constants in one chunk.")
+        error! "Too many constants in one chunk."
         return 0.to_i8
       end
 
@@ -170,6 +170,8 @@ module Lox
         emit_byte! Opcode::Not.value
       when TokenType::Minus
         emit_byte! Opcode::Negate.value
+      else
+        error! "Unrecognized unary operator type"
       end
     end
 
@@ -202,6 +204,8 @@ module Lox
         emit_byte! Opcode::Multiply.value
       when TokenType::Slash
         emit_byte! Opcode::Divide.value
+      else
+        error! "Unrecognized binary operator type"
       end
     end
 
@@ -213,6 +217,8 @@ module Lox
         emit_byte! Opcode::False.value
       when TokenType::True
         emit_byte! Opcode::True.value
+      else
+        error! "Unrecognized literal type"
       end
     end
 
@@ -221,7 +227,7 @@ module Lox
 
       prefix_rule = parse_rule(@@parser.previous.type).prefix
       if prefix_rule.nil?
-        error!("Expect expression.")
+        error! "Expect expression."
         return
       end
       prefix_rule.call()
