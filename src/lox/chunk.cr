@@ -14,6 +14,11 @@ module Lox
     Not
     Negate
     Return
+    Print
+    Pop
+    DefineGlobal
+    GetGlobal
+    SetGlobal
   end
 
   record UnknownOpcode, code : Int8
@@ -65,13 +70,14 @@ module Lox
         line = @line_numbers[i]
         code = Opcode.new(@bytes[i])
         result << case code
-        when Opcode::Constant
+        when Opcode::Constant, Opcode::DefineGlobal, Opcode::GetGlobal,
+             Opcode::SetGlobal
           i += 1
           {line, {code, [@bytes[i]]}}
         when Opcode::Nil, Opcode::False, Opcode::True, Opcode::Equal,
              Opcode::Greater, Opcode::Less, Opcode::Add, Opcode::Subtract,
              Opcode::Multiply, Opcode::Divide, Opcode::Not, Opcode::Negate,
-             Opcode::Return
+             Opcode::Return, Opcode::Print, Opcode::Pop
           {line, {code, [] of Operand}}
         else
           {line, UnknownOpcode.new(code.value)}

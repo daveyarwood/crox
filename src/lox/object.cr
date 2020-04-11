@@ -1,5 +1,6 @@
 module Lox
   abstract class Obj
+    abstract def print_representation : String
   end
 
   # We could probably just use Crystal's String type here instead. But soon,
@@ -12,6 +13,10 @@ module Lox
     @hash : UInt64
 
     getter :chars, :hash
+
+    def print_representation : String
+      chars.join
+    end
 
     def ObjString.new(chars : Array(Char))
       hash = chars.hash

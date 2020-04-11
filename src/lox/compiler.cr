@@ -23,12 +23,13 @@ module Lox
     end
 
     def parse_rule(operator_type : TokenType) : ParseRule
-      grouping = ->(){grouping!}
-      unary    = ->(){unary!}
-      binary   = ->(){binary!}
-      number   = ->(){number!}
-      literal  = ->(){literal!}
-      string   = ->(){string!}
+      grouping = ->(p : Precedence){grouping!(p)}
+      unary    = ->(p : Precedence){unary!(p)}
+      binary   = ->(p : Precedence){binary!(p)}
+      number   = ->(p : Precedence){number!(p)}
+      literal  = ->(p : Precedence){literal!(p)}
+      string   = ->(p : Precedence){string!(p)}
+      variable = ->(p : Precedence){variable!(p)}
 
       rules =
         Hash(TokenType, Tuple(ParseFn|Nil, ParseFn|Nil, Precedence)).new(
@@ -52,6 +53,7 @@ module Lox
       rules[TokenType::False]        = {literal,  nil,    Precedence::None}
       rules[TokenType::True]         = {literal,  nil,    Precedence::None}
       rules[TokenType::String]       = {string,   nil,    Precedence::None}
+      rules[TokenType::Identifier]   = {variable, nil,    Precedence::None}
 
       prefix, infix, precedence = rules[operator_type]
 
@@ -92,12 +94,40 @@ module Lox
       error_at!(@@parser.current, message)
     end
 
+    def synchronize!
+      @@parser.panic_mode = false
+
+      # Skip tokens until we reach something that looks like a statement
+      # boundary.
+      until current_token_is TokenType::EOF
+        return if previous_token_is TokenType::Semicolon
+
+        case @@parser.current.type
+        when TokenType::Class, TokenType::Fun, TokenType::Var, TokenType::For,
+          TokenType::If, TokenType::While, TokenType::Print, TokenType::Return
+          return
+        else
+          # keep going
+        end
+
+        advance!
+      end
+    end
+
+    def current_token_is(type : TokenType) : Bool
+      @@parser.current.type == type
+    end
+
+    def previous_token_is(type : TokenType) : Bool
+      @@parser.previous.type == type
+    end
+
     def advance!
       @@parser.previous = @@parser.current
 
       while true
         @@parser.current = @@scanner.scan_token!
-        break unless @@parser.current.type == TokenType::Error
+        break unless current_token_is TokenType::Error
         # The book has `errorAtCurrent(parser.current.start)`, but
         # `errorAtCurrent` expects a String message, not an Int. I think the
         # code in the book might be wrong. The context about where the error
@@ -108,8 +138,17 @@ module Lox
       end
     end
 
+    def match!(type : TokenType) : Bool
+      if current_token_is(type)
+        advance!
+        true
+      else
+        false
+      end
+    end
+
     def consume!(type : TokenType, message : String)
-      if @@parser.current.type == type
+      if current_token_is type
         advance!
       else
         error_at_current!(message)
@@ -145,20 +184,35 @@ module Lox
       emit_bytes! Opcode::Constant.value, make_constant!(value)
     end
 
-    def number! : Nil
+    def number!(precedence : Precedence) : Nil
       emit_constant! @@parser.previous.lexeme.to_f
     end
 
-    def string! : Nil
+    def string!(precedence : Precedence) : Nil
       emit_constant! ObjString.new(@@parser.previous.lexeme.chars[1..-2])
     end
 
-    def grouping! : Nil
-      expression!
-      consume!(TokenType::RightParen, "Expect ')' after expression.")
+    def named_variable!(name : Token, precedence : Precedence)
+      index = identifier_constant! name
+
+      if precedence <= Precedence::Assignment && match! TokenType::Equal
+        expression!
+        emit_bytes! Opcode::SetGlobal.value, index
+      else
+        emit_bytes! Opcode::GetGlobal.value, index
+      end
     end
 
-    def unary! : Nil
+    def variable!(precedence : Precedence) : Nil
+      named_variable! @@parser.previous, precedence
+    end
+
+    def grouping!(precedence : Precedence) : Nil
+      expression!
+      consume! TokenType::RightParen, "Expect ')' after expression."
+    end
+
+    def unary!(precedence : Precedence) : Nil
       operator_type = @@parser.previous.type
 
       # Compile the operand.
@@ -175,7 +229,7 @@ module Lox
       end
     end
 
-    def binary! : Nil
+    def binary!(precedence : Precedence) : Nil
       # Remember the operator.
       operator_type = @@parser.previous.type
 
@@ -209,7 +263,7 @@ module Lox
       end
     end
 
-    def literal! : Nil
+    def literal!(precedence : Precedence) : Nil
       case @@parser.previous.type
       when TokenType::Nil
         emit_byte! Opcode::Nil.value
@@ -230,16 +284,85 @@ module Lox
         error! "Expect expression."
         return
       end
-      prefix_rule.call()
+      prefix_rule.call(precedence)
 
       while precedence <= parse_rule(@@parser.current.type).precedence
         advance!
-        parse_rule(@@parser.previous.type).infix.not_nil!.call()
+        parse_rule(@@parser.previous.type).infix.not_nil!.call(precedence)
       end
+
+      # If we get here, the program is trying to do something weird like:
+      #
+      #    a * b = c + d
+      #
+      # i.e. the left hand side of the '=' isn't something that can be assigned
+      # to.
+      if precedence <= Precedence::Assignment && match! TokenType::Equal
+        error! "Invalid assignment target."
+      end
+    end
+
+    def identifier_constant!(name : Token) : Byte
+      make_constant! ObjString.new(name.lexeme.chars)
+    end
+
+    def parse_variable!(error_msg : String) : Byte
+      consume! TokenType::Identifier, error_msg
+      identifier_constant! @@parser.previous
+    end
+
+    def define_variable!(index : Byte)
+      emit_bytes! Opcode::DefineGlobal.value, index
     end
 
     def expression!
       parse_precedence! Precedence::Assignment
+    end
+
+    def variable_declaration!
+      index = parse_variable! "Expect variable name."
+
+      if match! TokenType::Equal
+        # var foo = 42;
+        expression!
+      else
+        # var foo;
+        emit_byte! Opcode::Nil.value
+      end
+
+      consume! TokenType::Semicolon, "Expect ';' after variable declaration."
+
+      define_variable! index
+    end
+
+    def print_statement!
+      expression!
+      consume! TokenType::Semicolon, "Expect ';' after value."
+      emit_byte! Opcode::Print.value
+    end
+
+    def expression_statement!
+      expression!
+      consume! TokenType::Semicolon, "Expect ';' after expression."
+      emit_byte! Opcode::Pop.value
+    end
+
+    def statement!
+      if match! TokenType::Print
+        print_statement!
+      else
+        expression_statement!
+      end
+    end
+
+    def declaration!
+      if match! TokenType::Var
+        variable_declaration!
+      else
+        statement!
+      end
+
+      synchronize! if @@parser.panic_mode
     end
 
     # TODO: Maybe this should return an error of some kind instead of Nil if the
@@ -247,11 +370,16 @@ module Lox
     def compile(input : String) : Chunk | Nil
       @@chunk = Chunk.new
       @@scanner = Scanner.new(input)
+
       advance!
-      expression!
-      consume!(TokenType::EOF, "Expected end of expression.")
-      # Our initial goal is to compile expressions, so doing this temporarily in
-      # order to shim the expression into a statement.
+
+      until match! TokenType::EOF
+        declaration!
+      end
+
+      # I'm not totally sure if this is right, but it's necessary right now in
+      # order to communicate to the VM that we're done so that the VM can return
+      # InterpretResult::OK.
       emit_return!
 
       return nil if @@parser.had_error

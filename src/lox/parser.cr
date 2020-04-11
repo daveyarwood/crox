@@ -26,7 +26,7 @@ module Lox
     Primary
   end
 
-  alias ParseFn = (->)
+  alias ParseFn = Proc(Precedence, Nil)
 
   # See `Compiler#parse_rule` for a table of TokenType => ParseRule.
   record ParseRule,

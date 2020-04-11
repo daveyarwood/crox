@@ -6,6 +6,7 @@ module Lox
     @@stack = [] of Lox::Value
     @@chunk = Chunk.new
     @@byte_index = 0
+    @@globals = {} of ObjString => Lox::Value
 
     def reset_stack!
       @@stack = [] of Lox::Value
@@ -195,8 +196,32 @@ module Lox
             return InterpretResult::RuntimeError
           end
         when Opcode::Return
-          puts "return: #{pop!}"
           return InterpretResult::OK
+        when Opcode::Print
+          puts Lox.print_representation(pop!)
+        when Opcode::Pop
+          pop!
+        when Opcode::DefineGlobal
+          name = read_constant!.as(ObjString)
+          @@globals[name] = pop!
+        when Opcode::GetGlobal
+          name = read_constant!.as(ObjString)
+          begin
+            push! @@globals[name]
+          rescue KeyError
+            runtime_error! "Undefined variable '#{name.chars.join}'."
+            return InterpretResult::RuntimeError
+          end
+        when Opcode::SetGlobal
+          name = read_constant!.as(ObjString)
+          unless @@globals.has_key? name
+            runtime_error! "Undefined variable '#{name.chars.join}'"
+            return InterpretResult::RuntimeError
+          end
+          # The books says that "assignment is an expression, so it needs to
+          # leave the value [on the stack] in case the assignment is nested
+          # inside some larger expression."
+          @@globals[name] = peek(0)
         end
       end
     end
