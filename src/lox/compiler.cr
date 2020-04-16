@@ -2,9 +2,70 @@ module Lox
   module Compiler
     extend self
 
+    struct Local
+      property name, depth
+
+      @depth : Int32 | Nil
+
+      def initialize(@name : Token)
+        # Locals start in an "uninitialized" state; for `depth`, nil is a
+        # sentinel value meaning "uninitialized". Depth gets set to a non-nil
+        # value (the current scope) during the process of defining a local
+        # variable. (See `add_local!` and `define_variable!`)
+        @depth = nil
+      end
+    end
+
+    struct Scope
+      property locals, locals_count, depth
+
+      def initialize
+        @locals = uninitialized Local[Byte::MAX]
+        @locals_count = 0
+        @depth = 0
+      end
+    end
+
+    @@scope = Scope.new
+
     # This is here so that the type of @@scanner can be Scanner instead of
     # (Scanner | Nil).
     @@scanner = Scanner.new("")
+
+    def begin_scope!
+      @@scope.depth += 1
+    end
+
+    def end_scope!
+      @@scope.depth -= 1
+
+      # Traverse the locals backwards (most recent first) and pop off all of
+      # the ones that are within the scope that we just ended.
+      while @@scope.locals_count > 0
+        local = @@scope.locals[@@scope.locals_count-1]
+        break if local.depth != nil && local.depth.not_nil! <= @@scope.depth
+
+        @@scope.locals_count -= 1
+        emit_byte! Opcode::Pop.value
+      end
+    end
+
+    def resolve_local(scope : Scope, name : Token) : Byte | Nil
+      (@@scope.locals_count-1).downto(0).each do |i|
+        local = @@scope.locals[i]
+
+        if local.name.lexeme == name.lexeme
+          # This error happens in cases like `{ var a = a; }`
+          if local.depth.nil?
+            error! "Cannot read local variable in its own initializer."
+          end
+
+          return i.to_i8
+        end
+      end
+
+      return nil
+    end
 
     # The initial state of `previous` and `current` doesn't really matter,
     # because they get filled in with actual tokens from the scanner when we do
@@ -193,13 +254,22 @@ module Lox
     end
 
     def named_variable!(name : Token, precedence : Precedence)
-      index = identifier_constant! name
+      arg = resolve_local @@scope, name
+
+      if arg.nil?
+        arg = identifier_constant! name
+        get_op = Opcode::GetGlobal
+        set_op = Opcode::SetGlobal
+      else
+        get_op = Opcode::GetLocal
+        set_op = Opcode::SetLocal
+      end
 
       if precedence <= Precedence::Assignment && match! TokenType::Equal
         expression!
-        emit_bytes! Opcode::SetGlobal.value, index
+        emit_bytes! set_op.value, arg
       else
-        emit_bytes! Opcode::GetGlobal.value, index
+        emit_bytes! get_op.value, arg
       end
     end
 
@@ -306,17 +376,85 @@ module Lox
       make_constant! ObjString.new(name.lexeme.chars)
     end
 
+    # The instructions to work with local variables refer to them by slot index,
+    # and that index is stored in a single-byte operand, which means our VM
+    # only supports up to Byte::MAX local variables in scope at a time.
+    def add_local!(name : Token)
+      if @@scope.locals_count == Byte::MAX
+        error! "Too many local variables in function."
+        return
+      end
+
+      # depth is notionally @@scope.depth, but we set it to nil initially as a
+      # way of saying that the local is "uninitialized"; then, we set it to the
+      # actual depth later in `define_variable!`
+      #
+      # We do this in order to avoid the following edge case:
+      #
+      # {
+      #   var a = "outer";
+      #   {
+      #     var a = a;
+      #   }
+      # }
+      local = Local.new(name)
+
+      @@scope.locals[@@scope.locals_count] = local
+      @@scope.locals_count += 1
+    end
+
+    def declare_variable!
+      # global variables are implicitly declared
+      return if @@scope.depth == 0
+
+      name = @@parser.previous
+
+      (@@scope.locals_count-1).downto(0) do |i|
+        local = @@scope.locals[i]
+
+        break if local.depth != nil && local.depth.not_nil! < @@scope.depth
+
+        if name.lexeme == local.name.lexeme
+          error! "A variable with this name was already declared in this scope."
+        end
+      end
+
+      add_local! name
+    end
+
     def parse_variable!(error_msg : String) : Byte
       consume! TokenType::Identifier, error_msg
+      declare_variable!
+
+      # local scope (return a dummy global table index)
+      return 0_i8 if @@scope.depth > 0
+
+      # global scope (record a global in the table and return its index)
       identifier_constant! @@parser.previous
     end
 
     def define_variable!(index : Byte)
+      # local scope: initialize the variable
+      if @@scope.depth > 0
+        @@scope.locals[@@scope.locals_count-1].depth = @@scope.depth
+        return
+      end
+
+      # global scope: define a global
       emit_bytes! Opcode::DefineGlobal.value, index
     end
 
     def expression!
       parse_precedence! Precedence::Assignment
+    end
+
+    def block!
+      while !current_token_is(TokenType::RightBrace) &&
+            !current_token_is(TokenType::EOF)
+        declaration!
+      end
+
+      consume! TokenType::RightBrace, "Expect '}' after block."
     end
 
     def variable_declaration!
@@ -350,6 +488,10 @@ module Lox
     def statement!
       if match! TokenType::Print
         print_statement!
+      elsif match! TokenType::LeftBrace
+        begin_scope!
+        block!
+        end_scope!
       else
         expression_statement!
       end

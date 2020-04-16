@@ -19,6 +19,8 @@ module Lox
     DefineGlobal
     GetGlobal
     SetGlobal
+    GetLocal
+    SetLocal
   end
 
   record UnknownOpcode, code : Int8
@@ -71,7 +73,7 @@ module Lox
         code = Opcode.new(@bytes[i])
         result << case code
         when Opcode::Constant, Opcode::DefineGlobal, Opcode::GetGlobal,
-             Opcode::SetGlobal
+             Opcode::SetGlobal, Opcode::GetLocal, Opcode::SetLocal
           i += 1
           {line, {code, [@bytes[i]]}}
         when Opcode::Nil, Opcode::False, Opcode::True, Opcode::Equal,

@@ -222,6 +222,16 @@ module Lox
           # leave the value [on the stack] in case the assignment is nested
           # inside some larger expression."
           @@globals[name] = peek(0)
+        when Opcode::GetLocal
+          # As an optimization, the stack serves a dual purpose as a place to
+          # store locals. The indexes are kept in sync with
+          # compiler.scope.locals, which is why we're dealing with stack indexes
+          # directly here instead of just pushing and popping values via `push!`
+          # and `pop!`.
+          push! @@stack[read_byte!]
+        when Opcode::SetLocal
+          # see comment above
+          @@stack[read_byte!] = peek(0)
         end
       end
     end
