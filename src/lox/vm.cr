@@ -5,7 +5,7 @@ module Lox
     # These are here so that the types can be Foo instead of (Foo | Nil).
     @@stack = [] of Lox::Value
     @@chunk = Chunk.new
-    @@byte_index = 0
+    @@ip = 0 # instruction pointer
     @@globals = {} of ObjString => Lox::Value
 
     def reset_stack!
@@ -30,16 +30,20 @@ module Lox
       RuntimeError
     end
 
-    # instruction pointer
-    def ip : Byte
-      @@chunk.bytes[@@byte_index]
+    def current_byte : Byte
+      @@chunk.bytes[@@ip]
+    end
+
+    def read_short! : UInt16
+      @@ip += 2
+      ((@@chunk.bytes[@@ip-2] << 8) | @@chunk.bytes[@@ip-1]).to_u16
     end
 
     def read_byte! : Byte
       # store the current byte so we can return it
-      byte = ip
+      byte = current_byte
       # increment the instruction pointer so it points to the NEXT byte
-      @@byte_index += 1
+      @@ip += 1
       # return the byte we just read
       byte
     end
@@ -96,7 +100,7 @@ module Lox
 
     def interpret!(chunk : Chunk) : InterpretResult
       @@chunk = chunk
-      @@byte_index = 0
+      @@ip = 0
       run!
     end
 
@@ -104,7 +108,7 @@ module Lox
       chunk = Lox::Compiler.compile(input)
       return InterpretResult::CompileError if chunk.nil?
       @@chunk = chunk
-      @@byte_index = 0
+      @@ip = 0
       run!
     end
 
@@ -135,7 +139,7 @@ module Lox
 
     def runtime_error!(format : String, *args : Object)
       STDERR.printf format + "\n", *args
-      line_number = @@chunk.line_numbers[@@byte_index]
+      line_number = @@chunk.line_numbers[@@ip]
       STDERR.printf "[line %d] in script\n", line_number
       reset_stack!
     end
@@ -232,6 +236,15 @@ module Lox
         when Opcode::SetLocal
           # see comment above
           @@stack[read_byte!] = peek(0)
+        when Opcode::Jump
+          offset = read_short!
+          @@ip += offset
+        when Opcode::JumpIfFalse
+          offset = read_short!
+          @@ip += offset unless peek(0)
+        when Opcode::Loop
+          offset = read_short!
+          @@ip -= offset
         end
       end
     end

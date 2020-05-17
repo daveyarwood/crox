@@ -1,5 +1,7 @@
 module Lox
-  enum Opcode : Int8
+  alias Byte = UInt8
+
+  enum Opcode : Byte
     Constant
     Nil
     True
@@ -21,11 +23,13 @@ module Lox
     SetGlobal
     GetLocal
     SetLocal
+    Jump
+    JumpIfFalse
+    Loop
   end
 
-  record UnknownOpcode, code : Int8
+  record UnknownOpcode, code : Byte
 
-  alias Byte = Int8
   alias Operand = Byte
 
   # An instruction is an opcode and zero or more operands
@@ -58,7 +62,7 @@ module Lox
     # to, so the caller can retrieve it when needed.
     def add_constant!(constant : Lox::Value) : Byte
       @constants << constant
-      (@constants.size - 1).to_i8
+      (@constants.size - 1).to_u8
     end
 
     alias DisassemblerEntry = Tuple(LineNumber, Instruction | UnknownOpcode)
@@ -76,6 +80,19 @@ module Lox
              Opcode::SetGlobal, Opcode::GetLocal, Opcode::SetLocal
           i += 1
           {line, {code, [@bytes[i]]}}
+        when Opcode::Jump, Opcode::JumpIfFalse, Opcode::Loop
+          i += 2
+          # The two operand bytes are read as a short representing the offset to
+          # jump.
+          #
+          # * Jump jumps forward by the offset (adds the offset to the IP).
+          # * JumpIfFalse does the same thing, but only if the value on top of
+          #   the stack is false.
+          # * Loop jumps backwards by the offset (subtracts the offset from the
+          #   IP)
+          #
+          # offset = ((@bytes[i-1] << 8) | @bytes[i]).to_u16
+          {line, {code, [@bytes[i-1], @bytes[i]]}}
         when Opcode::Nil, Opcode::False, Opcode::True, Opcode::Equal,
              Opcode::Greater, Opcode::Less, Opcode::Add, Opcode::Subtract,
              Opcode::Multiply, Opcode::Divide, Opcode::Not, Opcode::Negate,

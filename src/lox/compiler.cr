@@ -2,7 +2,7 @@ module Lox
   module Compiler
     extend self
 
-    struct Local
+    class Local
       property name, depth
 
       @depth : Int32 | Nil
@@ -60,7 +60,7 @@ module Lox
             error! "Cannot read local variable in its own initializer."
           end
 
-          return i.to_i8
+          return i.to_u8
         end
       end
 
@@ -91,6 +91,8 @@ module Lox
       literal  = ->(p : Precedence){literal!(p)}
       string   = ->(p : Precedence){string!(p)}
       variable = ->(p : Precedence){variable!(p)}
+      and      = ->(p : Precedence){and!(p)}
+      or       = ->(p : Precedence){or!(p)}
 
       rules =
         Hash(TokenType, Tuple(ParseFn|Nil, ParseFn|Nil, Precedence)).new(
@@ -110,6 +112,8 @@ module Lox
       rules[TokenType::Less]         = {nil,     binary, Precedence::Comparison}
       rules[TokenType::LessEqual]    = {nil,     binary, Precedence::Comparison}
       rules[TokenType::Number]       = {number,   nil,    Precedence::None}
+      rules[TokenType::And]          = {nil,      and,    Precedence::And}
+      rules[TokenType::Or]           = {nil,      or,     Precedence::Or}
       rules[TokenType::Nil]          = {literal,  nil,    Precedence::None}
       rules[TokenType::False]        = {literal,  nil,    Precedence::None}
       rules[TokenType::True]         = {literal,  nil,    Precedence::None}
@@ -228,6 +232,43 @@ module Lox
       emit_byte! Opcode::Return.value
     end
 
+    def emit_jump!(instruction : Opcode) : Int
+      emit_byte! instruction.value
+      # These two bytes serve as a placeholder operand for the jump offset. We
+      # can't fill them in right now because we don't know how far to jump yet.
+      #
+      # Later, when we know the offset, we backpatch it in - see `patch_jump!`
+      emit_bytes! 0xff_u8, 0xff_u8
+
+      # Return the offset of the first placeholder byte.
+      current_chunk.bytes.size - 2
+    end
+
+    def emit_loop!(loop_start : Int)
+      emit_byte! Opcode::Loop.value
+
+      # This offset is calculated from the instruction we're currently at to the
+      # loop_start point. The + 2 is to take into account the size of the Loop
+      # instruction's own operands, which we also need to jump over.
+      offset = current_chunk.bytes.size - loop_start + 2
+      error! "Loop body too large." if offset > UInt16::MAX
+
+      emit_byte! ((offset >> 8) & 0xff).to_u8
+      emit_byte! (offset & 0xff).to_u8
+    end
+
+    def patch_jump!(offset : Int)
+      # -2 to adjust for the bytecode for the jump offset itself
+      jump = current_chunk.bytes.size - offset - 2
+
+      if jump > UInt16::MAX
+        error! "Too much code to jump over."
+      end
+
+      current_chunk.bytes[offset] = ((jump >> 8) & 0xff).to_u8
+      current_chunk.bytes[offset + 1] = (jump & 0xff).to_u8
+    end
+
     def make_constant!(value : Lox::Value) : Byte
       constant_index = current_chunk.add_constant!(value)
 
@@ -235,10 +276,10 @@ module Lox
       # store up to Byte::MAX constants.
       if current_chunk.constants.size > Byte::MAX
         error! "Too many constants in one chunk."
-        return 0.to_i8
+        return 0.to_u8
       end
 
-      constant_index.to_i8
+      constant_index.to_u8
     end
 
     def emit_constant!(value : Lox::Value)
@@ -427,7 +468,7 @@ module Lox
       declare_variable!
 
       # local scope (return a dummy global table index)
-      return 0_i8 if @@scope.depth > 0
+      return 0_u8 if @@scope.depth > 0
 
       # global scope (record a global in the table and return its index)
       identifier_constant! @@parser.previous
@@ -442,6 +483,34 @@ module Lox
 
       # global scope: define a global
       emit_bytes! Opcode::DefineGlobal.value, index
+    end
+
+    def and!(precedence : Precedence) : Nil
+      # At this point, the left-hand side of the && has already been compiled
+      # and its value is on top of the stack.
+      #
+      # Here, we skip the right-hand side of the && if the value on top of the
+      # stack is false. We skip over the Pop instruction because we want to
+      # leave the value on the stack and let it be the result of the entire &&
+      # expression.
+      end_jump = emit_jump! Opcode::JumpIfFalse
+
+      # Otherwise, we discard the value and move on to evaluate the right-hand
+      # side.
+      emit_byte! Opcode::Pop.value
+      parse_precedence! Precedence::And
+      patch_jump! end_jump
+    end
+
+    def or!(precedence : Precedence) : Nil
+      else_jump = emit_jump! Opcode::JumpIfFalse
+      end_jump = emit_jump! Opcode::Jump
+
+      patch_jump! else_jump
+      emit_byte! Opcode::Pop.value
+
+      parse_precedence! Precedence::Or
+      patch_jump! end_jump
     end
 
     def expression!
@@ -485,9 +554,117 @@ module Lox
       emit_byte! Opcode::Pop.value
     end
 
+    def if_statement!
+      consume! TokenType::LeftParen, "Expect '(' after 'if'."
+      expression!
+      consume! TokenType::RightParen, "Expect ')' after condition."
+
+      # jumps past the "then" branch if the condition is false
+      then_jump = emit_jump! Opcode::JumpIfFalse
+      # pop the condition value off the stack
+      emit_byte! Opcode::Pop.value
+      # "then" branch
+      statement!
+
+      # jumps past the "else" branch (if the VM gets here, then the condition
+      # above was true, so we need to skip the "else" branch)
+      else_jump = emit_jump! Opcode::Jump
+
+      patch_jump! then_jump
+      # pop the condition value off the stack (if the VM gets here, it means it
+      # jumped over the Pop instruction above, so we need to do the Pop here)
+      emit_byte! Opcode::Pop.value
+
+      # (optional) "else" branch
+      if match! TokenType::Else
+        statement!
+      end
+
+      patch_jump! else_jump
+    end
+
+    def while_statement!
+      loop_start = current_chunk.bytes.size
+
+      consume! TokenType::LeftParen, "Expect '(' after 'while'."
+      expression!
+      consume! TokenType::RightParen, "Expect ')' after condition."
+
+      # Jump over the body statement if the condition is false.
+      exit_jump = emit_jump! Opcode::JumpIfFalse
+      # Pop the condition value off the stack.
+      emit_byte! Opcode::Pop.value
+      # body of the "while" loop
+      statement!
+
+      emit_loop! loop_start
+
+      patch_jump! exit_jump
+      # Pop the condition value off the stack.
+      emit_byte! Opcode::Pop.value
+    end
+
+    def for_statement!
+      begin_scope!
+
+      consume! TokenType::LeftParen, "Expect '(' after 'for'."
+
+      if match! TokenType::Semicolon
+        # no initializer
+      elsif match! TokenType::Var
+        variable_declaration!
+      else
+        expression_statement!
+      end
+
+      loop_start = current_chunk.bytes.size
+
+      exit_jump = nil
+      unless match! TokenType::Semicolon
+        expression!
+        consume! TokenType::Semicolon, "Expect ';' after loop condition."
+
+        # Jump out of the loop if the condition is false.
+        exit_jump = emit_jump! Opcode::JumpIfFalse
+        # Pop the condition value off the stack.
+        emit_byte! Opcode::Pop.value
+      end
+
+      unless match! TokenType::RightParen
+        body_jump = emit_jump! Opcode::Jump
+
+        increment_start = current_chunk.bytes.size
+        expression!
+        emit_byte! Opcode::Pop.value
+        consume! TokenType::RightParen, "Expect ')' after for clauses."
+
+        emit_loop! loop_start
+        loop_start = increment_start
+        patch_jump! body_jump
+      end
+
+      statement!
+
+      emit_loop! loop_start
+
+      unless exit_jump.nil?
+        patch_jump! exit_jump
+        # Pop the condition value off the stack.
+        emit_byte! Opcode::Pop.value
+      end
+
+      end_scope!
+    end
+
     def statement!
       if match! TokenType::Print
         print_statement!
+      elsif match! TokenType::For
+        for_statement!
+      elsif match! TokenType::If
+        if_statement!
+      elsif match! TokenType::While
+        while_statement!
       elsif match! TokenType::LeftBrace
         begin_scope!
         block!
