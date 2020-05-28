@@ -16,17 +16,31 @@ module Lox
       end
     end
 
-    struct Scope
-      property locals, locals_count, depth
+    enum FunctionType
+      Function
+      Script
+    end
 
-      def initialize
+    struct Scope
+      property function, function_type, locals, locals_count, depth
+
+      @function : FunctionObject
+      @function_type : FunctionType
+
+      def initialize(@function, @function_type)
         @locals = uninitialized Local[Byte::MAX]
         @locals_count = 0
         @depth = 0
       end
     end
 
-    @@scope = Scope.new
+    def script_scope : Scope
+      name = StringObject.new("".chars)
+      function = FunctionObject.new(name, 0, Chunk.new)
+      Scope.new(function, FunctionType::Script)
+    end
+
+    @@scope : Scope = script_scope
 
     # This is here so that the type of @@scanner can be Scanner instead of
     # (Scanner | Nil).
@@ -73,14 +87,8 @@ module Lox
     ARBITRARY = Token.new TokenType::Nil, "", 0, 0
     @@parser = Parser.new ARBITRARY, ARBITRARY, false, false
 
-    @@chunk = Chunk.new
-
-    # At the moment, we're only dealing with a single chunk, which we're storing
-    # in a global variable. The logic will get more complicated later on when we
-    # need to compile user-defined functions, so the logic of which chunk we're
-    # compiling to is encapsulated in this function.
     def current_chunk
-      @@chunk
+      @@scope.function.chunk
     end
 
     def parse_rule(operator_type : TokenType) : ParseRule
@@ -686,8 +694,20 @@ module Lox
 
     # TODO: Maybe this should return an error of some kind instead of Nil if the
     # input fails to compile?
-    def compile(input : String) : Chunk | Nil
-      @@chunk = Chunk.new
+    def compile(input : String) : FunctionObject | Nil
+      @@scope = script_scope
+
+      # The compiler implicitly claims stack slot zero for the VM's own internal
+      # use: at the start of each call frame, the compiler pushes the call
+      # frame's function onto the stack.
+      #
+      # We give this slot an empty name so that the user can't write an
+      # identifier that refers to it.
+      internal_use = Local.new(Token.new(TokenType::Identifier, "", 0, 0))
+      internal_use.depth = 0
+      @@scope.locals[@@scope.locals_count] = internal_use
+      @@scope.locals_count += 1
+
       @@scanner = Scanner.new(input)
 
       advance!
@@ -707,7 +727,7 @@ module Lox
         pp current_chunk.disassemble
       {% end %}
 
-      return @@chunk
+      return @@scope.function
     end
   end
 end

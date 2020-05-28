@@ -39,6 +39,21 @@ module Lox
     def initialize(@chars, @hash)
     end
   end
+
+  class FunctionObject < LoxObject
+    @name : StringObject
+    @arity : Int32
+    @chunk : Chunk
+
+    getter :arity, :chunk
+
+    def print_representation : String
+      return "<script>" if @name.chars.empty?
+
+      "<fn #{@name.print_representation}>"
+    end
+
+    def initialize(@name, @arity, @chunk)
     end
   end
 end

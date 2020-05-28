@@ -2,11 +2,36 @@ module Lox
   module VM
     extend self
 
+    def placeholder_fn : FunctionObject
+      name = StringObject.new("".chars)
+      FunctionObject.new(name, 0, Chunk.new)
+    end
+
+    struct CallFrame
+      property function, ip, slots
+
+      @function : FunctionObject
+      @ip : UInt8
+      @slots : Array(Lox::Value)
+
+      def initialize(@function, @ip, @slots)
+      end
+    end
+
     # These are here so that the types can be Foo instead of (Foo | Nil).
+    #
+    # NB: The book has us preallocating memory for the `frames` and `stacks` on
+    # the heap and keeping track of how many we have. I'm doing something
+    # simpler here because I don't care that much about performance, and maybe
+    # Crystal does some optimizations under the hood anyway.
+    @@frames = [] of CallFrame
+    @@frame = CallFrame.new(placeholder_fn, 0.to_u8, [] of Lox::Value)
     @@stack = [] of Lox::Value
-    @@chunk = Chunk.new
-    @@ip = 0 # instruction pointer
     @@globals = {} of StringObject => Lox::Value
+
+    def current_chunk
+      @@frame.function.chunk
+    end
 
     def reset_stack!
       @@stack = [] of Lox::Value
@@ -31,25 +56,26 @@ module Lox
     end
 
     def current_byte : Byte
-      @@chunk.bytes[@@ip]
+      current_chunk.bytes[@@frame.ip]
     end
 
     def read_short! : UInt16
-      @@ip += 2
-      ((@@chunk.bytes[@@ip-2] << 8) | @@chunk.bytes[@@ip-1]).to_u16
+      @@frame.ip += 2
+      ((current_chunk.bytes[@@frame.ip-2] << 8) \
+       | current_chunk.bytes[@@frame.ip-1]).to_u16
     end
 
     def read_byte! : Byte
       # store the current byte so we can return it
       byte = current_byte
       # increment the instruction pointer so it points to the NEXT byte
-      @@ip += 1
+      @@frame.ip += 1
       # return the byte we just read
       byte
     end
 
     def read_constant! : Lox::Value
-      @@chunk.constants[read_byte!]
+      current_chunk.constants[read_byte!]
     end
 
     macro binary_op!(op)
@@ -98,17 +124,13 @@ module Lox
       return true
     end
 
-    def interpret!(chunk : Chunk) : InterpretResult
-      @@chunk = chunk
-      @@ip = 0
-      run!
-    end
-
     def interpret!(input : String) : InterpretResult
-      chunk = Lox::Compiler.compile(input)
-      return InterpretResult::CompileError if chunk.nil?
-      @@chunk = chunk
-      @@ip = 0
+      function = Lox::Compiler.compile(input)
+      return InterpretResult::CompileError if function.nil?
+
+      push! function
+      @@frames << CallFrame.new(function, @@frame.ip, @@stack)
+
       run!
     end
 
@@ -139,15 +161,15 @@ module Lox
 
     def runtime_error!(format : String, *args : Object)
       STDERR.printf format + "\n", *args
-      line_number = @@chunk.line_numbers[@@ip]
+      line_number = current_chunk.line_numbers[@@frame.ip]
       STDERR.printf "[line %d] in script\n", line_number
       reset_stack!
     end
 
     # The behavior of splat arguments in Crystal is a little unexpected. Given
     # the definition above where the overload is (String, *Object), I would
-    # expect that passing in just a string and no additional would work, but
-    # instead, I get this error:
+    # expect that passing in just a string and no additional arguments would
+    # work, but instead, I get this error:
     #
     # Error: no overload matches 'Lox::VM.runtime_error!' with type String
     #
@@ -159,11 +181,13 @@ module Lox
     end
 
     def run! : InterpretResult
+      @@frame = @@frames[-1]
+
       while true
         instruction = Opcode.new(read_byte!)
 
         {% if flag?(:debug_trace_execution) %}
-          puts "stack: #{@@stack}, instruction: #{instruction}"
+          puts "stack: #{@@stack.map{|x| Lox.print_representation(x) }}, instruction: #{instruction}"
         {% end %}
 
         case instruction
@@ -232,19 +256,19 @@ module Lox
           # compiler.scope.locals, which is why we're dealing with stack indexes
           # directly here instead of just pushing and popping values via `push!`
           # and `pop!`.
-          push! @@stack[read_byte!]
+          push! @@frame.slots[read_byte!]
         when Opcode::SetLocal
           # see comment above
-          @@stack[read_byte!] = peek(0)
+          @@frame.slots[read_byte!] = peek(0)
         when Opcode::Jump
           offset = read_short!
-          @@ip += offset
+          @@frame.ip += offset
         when Opcode::JumpIfFalse
           offset = read_short!
-          @@ip += offset unless peek(0)
+          @@frame.ip += offset unless peek(0)
         when Opcode::Loop
           offset = read_short!
-          @@ip -= offset
+          @@frame.ip -= offset
         end
       end
     end
