@@ -291,7 +291,7 @@ module Lox
     end
 
     def string!(precedence : Precedence) : Nil
-      emit_constant! ObjString.new(@@parser.previous.lexeme.chars[1..-2])
+      emit_constant! StringObject.new(@@parser.previous.lexeme.chars[1..-2])
     end
 
     def named_variable!(name : Token, precedence : Precedence)
@@ -414,7 +414,7 @@ module Lox
     end
 
     def identifier_constant!(name : Token) : Byte
-      make_constant! ObjString.new(name.lexeme.chars)
+      make_constant! StringObject.new(name.lexeme.chars)
     end
 
     # The instructions to work with local variables refer to them by slot index,

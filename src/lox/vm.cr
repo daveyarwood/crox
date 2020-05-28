@@ -6,7 +6,7 @@ module Lox
     @@stack = [] of Lox::Value
     @@chunk = Chunk.new
     @@ip = 0 # instruction pointer
-    @@globals = {} of ObjString => Lox::Value
+    @@globals = {} of StringObject => Lox::Value
 
     def reset_stack!
       @@stack = [] of Lox::Value
@@ -69,9 +69,9 @@ module Lox
       a = pop!
 
       case {a, b}
-      when {ObjString, ObjString}
+      when {StringObject, StringObject}
         push! a == b
-      when {Obj, _}, {_, Obj}
+      when {LoxObject, _}, {_, LoxObject}
         runtime_error! "Equality semantics undefined: #{a.class} == #{b.class}"
         return false
       else
@@ -86,8 +86,8 @@ module Lox
       a = pop!
 
       case {a, b}
-      when {ObjString, ObjString}
-        push! ObjString.new(a.chars + b.chars)
+      when {StringObject, StringObject}
+        push! StringObject.new(a.chars + b.chars)
       when {Float64, Float64}
         push! (a + b)
       else
@@ -206,10 +206,10 @@ module Lox
         when Opcode::Pop
           pop!
         when Opcode::DefineGlobal
-          name = read_constant!.as(ObjString)
+          name = read_constant!.as(StringObject)
           @@globals[name] = pop!
         when Opcode::GetGlobal
-          name = read_constant!.as(ObjString)
+          name = read_constant!.as(StringObject)
           begin
             push! @@globals[name]
           rescue KeyError
@@ -217,7 +217,7 @@ module Lox
             return InterpretResult::RuntimeError
           end
         when Opcode::SetGlobal
-          name = read_constant!.as(ObjString)
+          name = read_constant!.as(StringObject)
           unless @@globals.has_key? name
             runtime_error! "Undefined variable '#{name.chars.join}'"
             return InterpretResult::RuntimeError

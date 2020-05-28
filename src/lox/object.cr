@@ -1,13 +1,12 @@
 module Lox
-  abstract class Obj
+  abstract class LoxObject
     abstract def print_representation : String
   end
 
-  # We could probably just use Crystal's String type here instead. But soon,
-  # we'll need to add other types of Objs, like instances and functions. So it's
-  # good to go ahead and lay the groundwork now.
-  class ObjString < Obj
-    @@interned = Set(ObjString).new
+  # We could probably just use Crystal's String type here instead. But this was
+  # a good first exercise in implementing LoxObjects.
+  class StringObject < LoxObject
+    @@interned = Set(StringObject).new
 
     @chars : Array(Char)
     @hash : UInt64
@@ -18,10 +17,10 @@ module Lox
       chars.join
     end
 
-    def ObjString.new(chars : Array(Char))
+    def StringObject.new(chars : Array(Char))
       hash = chars.hash
 
-      # If we've already interned this string, return the existing ObjString
+      # If we've already interned this string, return the existing StringObject
       # instance.
       @@interned.each do |objstr|
         return objstr if objstr.chars.size == chars.size &&
@@ -29,8 +28,9 @@ module Lox
           objstr.chars == chars
       end
 
-      # Otherwise, instantiate a new ObjString instance, intern and return it.
-      instance = ObjString.allocate
+      # Otherwise, instantiate a new StringObject instance, intern and return
+      # it.
+      instance = StringObject.allocate
       instance.initialize(chars, hash)
       @@interned << instance
       instance
