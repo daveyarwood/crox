@@ -36,9 +36,9 @@ module Lox
       instance
     end
 
-    def initialize(chars : Array(Char), hash : UInt64)
-      @chars = chars
-      @hash = hash
+    def initialize(@chars, @hash)
+    end
+  end
     end
   end
 end
