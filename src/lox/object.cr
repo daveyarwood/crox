@@ -45,7 +45,8 @@ module Lox
     @arity : Int32
     @chunk : Chunk
 
-    getter :arity, :chunk
+    property :arity
+    getter :name, :chunk
 
     def print_representation : String
       return "<script>" if @name.chars.empty?
@@ -54,6 +55,21 @@ module Lox
     end
 
     def initialize(@name, @arity, @chunk)
+    end
+  end
+
+  alias NativeFunction = Proc(Array(Value), Value)
+
+  class NativeFunctionObject < LoxObject
+    @native_function : NativeFunction
+
+    getter :name, :native_function
+
+    def print_representation : String
+      "<native fn>"
+    end
+
+    def initialize(@native_function)
     end
   end
 end

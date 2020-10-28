@@ -7,7 +7,7 @@ module Lox
       FunctionObject.new(name, 0, Chunk.new)
     end
 
-    struct CallFrame
+    class CallFrame
       property function, ip, slots
 
       @function : FunctionObject
@@ -17,6 +17,10 @@ module Lox
       def initialize(@function, @ip, @slots)
       end
     end
+
+    # We have to set a limit on call frames to avoid stack overflow, e.g. in the
+    # case of infinite recursion.
+    FRAMES_MAX = 64
 
     # These are here so that the types can be Foo instead of (Foo | Nil).
     #
@@ -28,6 +32,11 @@ module Lox
     @@frame = CallFrame.new(placeholder_fn, 0.to_u8, [] of Lox::Value)
     @@stack = [] of Lox::Value
     @@globals = {} of StringObject => Lox::Value
+
+    @@globals[StringObject.new("clock".chars)] = NativeFunctionObject.new(
+      ->(args : Array(Lox::Value)) {
+        Time.monotonic.seconds.to_f.as Lox::Value
+      })
 
     def current_chunk
       @@frame.function.chunk
@@ -129,7 +138,7 @@ module Lox
       return InterpretResult::CompileError if function.nil?
 
       push! function
-      @@frames << CallFrame.new(function, @@frame.ip, @@stack)
+      call_value! function, 0
 
       run!
     end
@@ -161,8 +170,17 @@ module Lox
 
     def runtime_error!(format : String, *args : Object)
       STDERR.printf format + "\n", *args
-      line_number = current_chunk.line_numbers[@@frame.ip]
-      STDERR.printf "[line %d] in script\n", line_number
+
+      @@frames.reverse.each do |frame|
+        line_number = frame.function.chunk.line_numbers[frame.ip]
+        if frame.function.name.chars.empty?
+          location = "script"
+        else
+          location = "#{frame.function.name.chars.join}()"
+        end
+        STDERR.printf "[line %d] in %s\n", line_number, location
+      end
+
       reset_stack!
     end
 
@@ -180,6 +198,82 @@ module Lox
       runtime_error! format, {nil}
     end
 
+    def call!(function : FunctionObject, arg_count : Byte) : Bool
+      unless arg_count == function.arity
+        runtime_error! \
+          "Expected %d arguments but got %d.", \
+          function.arity, \
+          arg_count
+
+        return false
+      end
+
+      # Ensure that a deep call chain doesn't overflow the stack, e.g. in the
+      # case of infinite recursion.
+      if @@frames.size == FRAMES_MAX
+        runtime_error! "Stack overflow."
+        return false
+      end
+
+      # FIXME: That last argument is supposed to be translated from:
+      #
+      #   frame->slots = vm.stackTop - argCount - 1
+      #
+      # I'm supposed to be setting up the slots "pointer" (which is not a
+      # pointer, in my implementation, but an actual array of slots) to give the
+      # frame its window into the stack.
+      #
+      # Maybe the thing to do is to copy the current frame's slots from the IP
+      # to the end? arg_count also needs to be considered though...
+      #
+      # --- if the code below works, remove the FIXME comment above ---
+      #
+      # In the C code, the slots are all stored in a single data structure, and
+      # each call frame stores an instruction pointer (IP) to where it is in
+      # that structure.
+      #
+      # In our version, we copy the slots we need into the new call frame. We
+      # copy the topmost (argument count + 1) slots, the "+ 1" being there so
+      # that we skip over local slot 0, which contains the function being
+      # called. (The book says that we currently aren't using that slot, but we
+      # will when we get to methods.)
+      if @@frames.empty?
+        slots = [] of Lox::Value
+      elsif @@frames[-1].slots.empty?
+        slots = [] of Lox::Value
+      else
+        slots = @@frames[-1].slots[(-1 - arg_count - 1)..-1]
+      end
+      @@frames << CallFrame.new(function, 0.to_u8, slots)
+      return true
+    end
+
+    def call_value!(callee : Value, arg_count : Byte) : Bool
+      case callee
+      when FunctionObject
+        return call! callee, arg_count
+      when NativeFunctionObject
+        if @@frames.empty?
+          args = [] of Lox::Value
+        elsif @@frames[-1].slots.empty?
+          args = [] of Lox::Value
+        else
+          args = @@frames[-1].slots[(-1 - arg_count - 1)..-1]
+        end
+
+        # Pop the function object off of the stack.
+        pop!
+
+        # Push the result of calling the function onto the stack.
+        push! callee.native_function.call(args)
+
+        return true
+      else
+        runtime_error! "Can only call functions and classes."
+        return false
+      end
+    end
+
     def run! : InterpretResult
       @@frame = @@frames[-1]
 
@@ -187,7 +281,7 @@ module Lox
         instruction = Opcode.new(read_byte!)
 
         {% if flag?(:debug_trace_execution) %}
-          puts "stack: #{@@stack.map{|x| Lox.print_representation(x) }}, instruction: #{instruction}"
+          puts "frames: #{@@frames.size}, stack: #{@@stack.map{|x| Lox.print_representation(x) }}, instruction: #{instruction}"
         {% end %}
 
         case instruction
@@ -223,8 +317,39 @@ module Lox
             runtime_error! "Operand must be a number."
             return InterpretResult::RuntimeError
           end
+        when Opcode::Call
+          arg_count = read_byte!
+
+          unless call_value! peek(arg_count), arg_count
+            return InterpretResult::RuntimeError
+          end
+
+          # If call_value! is successful, there will be a new frame on the
+          # CallFrame stack for the called function. We now set @@frame to the
+          # new frame on top of the stack, so that when we go to read the next
+          # instruction byte, it will be from the new frame. In other words, we
+          # are jumping into the code for the function that has been called.
+          @@frame = @@frames[-1]
         when Opcode::Return
-          return InterpretResult::OK
+          # Hang onto the return value so that we can push it onto the stack
+          # at the end.
+          result = pop!
+
+          # Discard the returning function's CallFrame.
+          @@frames.pop
+
+          # If this is the very last CallFrame, that means we've finished
+          # executing the top level code. The entire program is done, so we pop
+          # the main script function from the stack and exit the interpreter.
+          if @@frames.empty?
+            pop!
+            return InterpretResult::OK
+          end
+
+          # FIXME: Am I translating the C code correctly?
+          push! result
+
+          @@frame = @@frames[-1]
         when Opcode::Print
           puts Lox.print_representation(pop!)
         when Opcode::Pop

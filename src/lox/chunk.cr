@@ -15,6 +15,7 @@ module Lox
     Divide
     Not
     Negate
+    Call
     Return
     Print
     Pop
@@ -77,7 +78,7 @@ module Lox
         code = Opcode.new(@bytes[i])
         result << case code
         when Opcode::Constant, Opcode::DefineGlobal, Opcode::GetGlobal,
-             Opcode::SetGlobal, Opcode::GetLocal, Opcode::SetLocal
+             Opcode::SetGlobal, Opcode::GetLocal, Opcode::SetLocal, Opcode::Call
           i += 1
           {line, {code, [@bytes[i]]}}
         when Opcode::Jump, Opcode::JumpIfFalse, Opcode::Loop

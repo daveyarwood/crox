@@ -21,23 +21,34 @@ module Lox
       Script
     end
 
-    struct Scope
-      property function, function_type, locals, locals_count, depth
+    class Scope
+      property enclosing, function, function_type, locals, locals_count, depth
 
+      @enclosing : Scope | Nil
       @function : FunctionObject
       @function_type : FunctionType
 
-      def initialize(@function, @function_type)
+      def initialize(@enclosing, @function, @function_type)
         @locals = uninitialized Local[Byte::MAX]
         @locals_count = 0
         @depth = 0
       end
     end
 
-    def script_scope : Scope
-      name = StringObject.new("".chars)
+    def scope(
+      enclosing : Scope | Nil, name : String, function_type : FunctionType
+    ) : Scope
+      name = StringObject.new(name.chars)
       function = FunctionObject.new(name, 0, Chunk.new)
-      Scope.new(function, FunctionType::Script)
+      Scope.new(enclosing, function, function_type)
+    end
+
+    def script_scope : Scope
+      scope(nil, "", FunctionType::Script)
+    end
+
+    def function_scope(name : String) : Scope
+      scope(@@scope, name, FunctionType::Function)
     end
 
     @@scope : Scope = script_scope
@@ -95,6 +106,7 @@ module Lox
       grouping = ->(p : Precedence){grouping!(p)}
       unary    = ->(p : Precedence){unary!(p)}
       binary   = ->(p : Precedence){binary!(p)}
+      call     = ->(p : Precedence){call!(p)}
       number   = ->(p : Precedence){number!(p)}
       literal  = ->(p : Precedence){literal!(p)}
       string   = ->(p : Precedence){string!(p)}
@@ -107,7 +119,7 @@ module Lox
         {nil, nil, Precedence::None}
       )
 
-      rules[TokenType::LeftParen]    = {grouping, nil,    Precedence::None}
+      rules[TokenType::LeftParen]    = {grouping, call,    Precedence::Call}
       rules[TokenType::Minus]        = {unary,    binary, Precedence::Term}
       rules[TokenType::Plus]         = {nil,      binary, Precedence::Term}
       rules[TokenType::Slash]        = {nil,      binary, Precedence::Factor}
@@ -237,6 +249,7 @@ module Lox
     end
 
     def emit_return!
+      emit_byte! Opcode::Nil.value
       emit_byte! Opcode::Return.value
     end
 
@@ -382,6 +395,11 @@ module Lox
       end
     end
 
+    def call!(precedence : Precedence) : Nil
+      arg_count = argument_list!
+      emit_bytes! Opcode::Call.value, arg_count
+    end
+
     def literal!(precedence : Precedence) : Nil
       case @@parser.previous.type
       when TokenType::Nil
@@ -482,15 +500,43 @@ module Lox
       identifier_constant! @@parser.previous
     end
 
+    def mark_initialized!
+      return if @@scope.depth == 0
+      @@scope.locals[@@scope.locals_count-1].depth = @@scope.depth
+    end
+
     def define_variable!(index : Byte)
       # local scope: initialize the variable
       if @@scope.depth > 0
-        @@scope.locals[@@scope.locals_count-1].depth = @@scope.depth
+        mark_initialized!
         return
       end
 
       # global scope: define a global
       emit_bytes! Opcode::DefineGlobal.value, index
+    end
+
+    # Compiles the arguments passed to a function and returns the number of
+    # arguments compiled.
+    def argument_list! : Byte
+      arg_count = 0.to_u8
+
+      unless current_token_is TokenType::RightParen
+        loop do
+          expression!
+
+          if arg_count == 255
+            error! "Cannot have more than 255 arguments."
+          end
+
+          arg_count += 1
+          break unless match! TokenType::Comma
+        end
+      end
+
+      consume! TokenType::RightParen, "Expect ')' after arguments."
+
+      arg_count
     end
 
     def and!(precedence : Precedence) : Nil
@@ -534,6 +580,52 @@ module Lox
       consume! TokenType::RightBrace, "Expect '}' after block."
     end
 
+    def function!(type : FunctionType)
+      @@scope = function_scope(@@parser.previous.lexeme)
+      begin_scope!
+
+      # parameter list
+      consume! TokenType::LeftParen, "Expect '(' after function name."
+      unless current_token_is TokenType::RightParen
+        loop do
+          @@scope.function.arity += 1
+          if @@scope.function.arity > 255
+            error_at_current! "Cannot have more than 255 parameters."
+          end
+
+          puts "function! defining variable"
+          define_variable! parse_variable!("Expect parameter name.")
+
+          break unless match! TokenType::Comma
+        end
+      end
+      consume! TokenType::RightParen, "Expect ')' after parameters."
+
+      # function body
+      consume! TokenType::LeftBrace, "Expect '{' before function body."
+      block!
+
+      # NOTE: In the C code, this lives in a helper function, endCompiler
+      emit_return!
+
+      # Un-comment this to see the disassembler output of the function that's
+      # about to get hidden away as a constant.
+      # {% if flag?(:debug_print_code) %}
+      #   # pp current_chunk.disassemble
+      # {% end %}
+
+      function = @@scope.function
+      @@scope = @@scope.enclosing.not_nil!
+      emit_bytes! Opcode::Constant.value, make_constant!(function)
+    end
+
+    def function_declaration!
+      global = parse_variable! "Expect function name."
+      mark_initialized!
+      function! FunctionType::Function
+      define_variable! global
+    end
+
     def variable_declaration!
       index = parse_variable! "Expect variable name."
 
@@ -554,6 +646,20 @@ module Lox
       expression!
       consume! TokenType::Semicolon, "Expect ';' after value."
       emit_byte! Opcode::Print.value
+    end
+
+    def return_statement!
+      if @@scope.function_type == FunctionType::Script
+        error! "Can't return from top-level code."
+      end
+
+      if match! TokenType::Semicolon
+        emit_return!
+      else
+        expression!
+        consume! TokenType::Semicolon, "Expect ';' after return value."
+        emit_byte! Opcode::Return.value
+      end
     end
 
     def expression_statement!
@@ -671,6 +777,8 @@ module Lox
         for_statement!
       elsif match! TokenType::If
         if_statement!
+      elsif match! TokenType::Return
+        return_statement!
       elsif match! TokenType::While
         while_statement!
       elsif match! TokenType::LeftBrace
@@ -683,7 +791,9 @@ module Lox
     end
 
     def declaration!
-      if match! TokenType::Var
+      if match! TokenType::Fun
+        function_declaration!
+      elsif match! TokenType::Var
         variable_declaration!
       else
         statement!
